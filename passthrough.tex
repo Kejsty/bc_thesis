@@ -1,0 +1,219 @@
+\newcommand{\vmsyscall}{\texttt{\_\_vm\_syscall}\xspace}
+
+\chapter{Syscall Passthrough } \label{chap:passthrough}
+
+Presently, \divine supports many syscalls and there is an intention to implement more of them in the future. However, \divine is actually incapable of having every one of them fully implemented since some syscalls build on operations which are unsupported in \divine (such as communication with outside world). This applies for example to sockets which communicate with the Internet.
+
+We implemented a mechanism called \textit{syscall passthrough} through which \dios gains the ability to execute system calls in the host operating system (i.e. the operating system \divine is running on).
+
+The motivation behind the \textit{syscall passthrough} from \dios to the host's kernel is to provide the ability to use almost all system calls and by that enlarge the number of programs that \divine can verify.
+
+The idea of passing the calls through the \divine (shown in Fig.~\ref{fig:passthrough:scheme}) is that a syscall invoked by a program is noticed by \dios and then forwarded directly to the host's kernel via \texttt{libc} function \texttt{syscall}. Subsequently, the result of the syscall is returned back to \dios to process it. 
+
+This approach brings the ability to run a program operating with almost any syscall, however, it is impossible to use this technique for the \textit{verify} mode of \divine, as there would be a problem with thread interleaving already mentioned in Sec.~\ref{sec:divine:filesystem}. Nevertheless, this problem can be partially mitigated by recording and replaying syscalls, as will be shown in Sec.~\ref{chap:replay}.
+
+Of course, this approach is not \textit{safe}  for every syscall (as propagation of several system calls can have unexpected results, for example, system call \textit{exit} kills the whole run of \divine, not only the program) and makes use of the fact that \divine can explore just a single run of the given program using the \textit{run} mode.
+
+\begin{figure}[h!]
+\small
+\begin{tikzpicture}[ auto, node distance=3cm
+                   , semithick
+                   , style={ node distance = 2em }
+                   , state/.style={ rectangle, draw=black,
+                     minimum height=1.7em, minimum width = 18em, inner
+                     sep=2pt, text centered, node distance = 2em }
+                   , shaded/.style = { fill = black!25!white }
+                   ]
+
+    \node[state, shaded] (usrp) {User's program + libraries};
+    \node[state, shaded, below = 0em of usrp.south west, anchor = north west]
+        (libs) {C/C++ standard libraries, \texttt{pthreads}};
+    \node[state, shaded, below = 0em of libs.south west, anchor = north west]
+        (dios) {DiOS};
+    \node[state, below = 0em of dios.south west, anchor = north west]
+        (divm) {DiVM};
+    \node[state, below = 0em of divm.south west, anchor = north west]
+        (alg) {Verification core};
+
+    \draw[in=0, out=0, >=stealth', looseness=1.7]
+        (usrp) edge[->] (dios)
+        (libs) edge (dios)
+      ;
+
+    \draw[in=180, out=180, >=stealth', looseness=1.7]
+        (libs) edge[->] (divm)
+        (dios) edge (divm)
+      ;
+    \node[left = of divm.west] {hypercalls};
+    \node[right = of dios.east, align = left] {syscalls};
+
+    \draw[dashed, thin]
+        (libs.north west) -- ++(-7em,0)
+        (libs.north east) -- ++(7em,0)
+      ;
+    \node[left = 7em of libs.west, anchor = west] {\divine};
+
+    \node[state, below = 0em of alg.south west, anchor = north west] (slibs)
+    {System libc and libc++};
+    \node[state, below = 0em of slibs.south west, anchor = north west] (linux)
+    {Linux kernel};
+
+    \draw[dashed, thin]
+        (alg.south west) -- ++(-7em,0)
+        (alg.south east) -- ++(7em,0)
+      ;
+    \node[left = 7em of slibs.west, anchor = west] {Host system};
+
+    \draw[in=0, out=0, >=stealth', looseness=1.7]
+        (divm) edge[->] (linux)
+        (alg) edge (linux)
+        (slibs) edge (linux)
+      ;
+    \node[right = of linux.east, align = left] {host syscalls};
+
+    \draw[color=red, line width = 0.3em, dashed]
+        (usrp) edge[->, out=0, in=0, looseness=1.7] (dios)
+        (libs) edge[out=0, in=0, looseness=1.7] (dios)
+        (dios.east) edge[opacity=0.5] (dios.west)
+        (dios) edge[->, out=180, in=180, looseness=1.7] (divm)
+        (divm.west) edge[opacity=0.5] (divm.east)
+        (divm) edge[->, out=0, in=0, looseness=1.7] (linux)
+      ;
+    \node[right = 3em of divm.south east, align = left, color=red] {\bf syscall\\passthrough};
+
+\end{tikzpicture}
+\caption{
+    A scheme showing the propagation of a system call request through \divine into the host system~\cite{propagationScheme}.
+} \label{fig:passthrough:scheme}
+\end{figure}
+
+\section{The \texttt{libc} Function \texttt{syscall} }  \label{sec:passthrough:syscall}
+
+\begin{figure}[h!]
+\begin{lstlisting}
+long syscall(long number, ...);
+\end{lstlisting}
+\caption{
+    Declaration of \texttt{libc} function \texttt{syscall} from header file \textit{sys/syscall.h}. Taken from the Linux manual pages~\cite{Man_syscall}.
+}
+\label{fig:passthrough:syscall}
+\end{figure}
+
+When a program executes a syscall, the process running the program must provide the kernel among others with a parameter named \textit{system call number}. This number identifies this call but is architecture specific. For example, the x86\_64 architecture provides 322 system calls and the x86 architecture provides 358 system calls~\cite{LinuxTable} as it contains also additional x32-specific system calls.
+
+In \divine, we implemented the support passthrough of x86\_64 architecture system calls.
+
+
+\section{Passthrough Support in DiVM}  \label{sec:passthrough:vmsyscall}
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=Macro]
+__vm_syscall( __dios::_VM_SC_write,
+      _VM_SC_Out | _VM_SC_Int64, &written,
+      _VM_SC_In | _VM_SC_Int32, fd,
+      _VM_SC_In | _VM_SC_Mem, length, message,
+      _VM_SC_In | _VM_SC_Int64, length );
+\end{lstlisting}
+\caption{
+    An example of invocation of \vmsyscall that performs a \texttt{read} syscall passthrough.
+}
+\label{fig:passthrough:writePassthrough}
+\end{figure}
+
+To implement \textit{syscall passthrough} we need an additional functionality from \divine, which will allow the call of the \texttt{libc} function \texttt{syscall}  (see Fig.~\ref{sec:passthrough:syscall}) on the host system. 
+
+This cannot be done by \dios directly as \dios has no ability to call functions outside the verified program. Thus, every operation outside \divine must be realised through \divm. For this reason, \divm provides an hypercall  \vmsyscall which serves as the wrapper of \texttt{libc} function \texttt{syscall}. An example of usage is shown in Fig.~\ref{fig:passthrough:writePassthrough}.
+
+The function \vmsyscall takes at least three parameters. First is the system call number, second is the type of an output variable, and the third is the address of the output variable, i.e. an address for storing the result of the propagated system call. Additional arguments are optional but must follow several rules:
+
+ \begin{itemize}
+     \item If the passed argument contains a value to be read by a syscall, the additional flag \_VM\_SC\_Out must be passed. Otherwise, if we pass an address that expects to be filled, we provide flag \_VM\_SC\_In
+ 
+     \item If the passed argument is a scalar of size 32 or 64 bits, the flag must contain \_VM\_SC\_32 or \_VM\_SC\_64. On the other hand, if it is not a scalar, i.e. array, structure or a pointer to a structure, we pass flag \_VM\_SC\_Mem
+     \item If we pass the flag \_VM\_SC\_Mem, an additional argument providing the length of the valid memory must be involved, so the memory can be correctly copied between \divine and the host system. 
+ \end{itemize}
+ 
+Arguments are passed in the order flag; argument.
+
+This way, the \vmsyscall does not have to possess any system-specific knowledge and thus can be more general and usable for any system call. However, \dios has the responsibility of providing correct argument's metadata.
+  
+Recall the example from Fig.~\ref{fig:passthrough:writePassthrough}.
+ The argument \textsf{written} is an \textit{address} for the return value of the propagated syscall, so the flag \_VM\_SC\_Out is added. The return value of \texttt{libc} function write is of type \texttt{size\_t}, which has usually 64 bits, thus the argument also contains flag \_VM\_SC\_64.    
+
+On the other hand, the argument \textsf{message}, which represent the second argument of the \texttt{libc} function write, is of a type \textit{const char *}. Hence, flags passed for this argument are \_VM\_SC\_In, because it \textit{contains} a value, together with the flag \_VM\_SC\_Mem, as the type represents an array of characters, not a scalar. Since the  \_VM\_SC\_Mem flag is added, before passing the argument \textsf{message}, an additional argument is included, specifically the length of the \textsf{message} array.
+
+The function \vmsyscall returns an integer representing the value of errno after executing the system call on the host system.
+
+\section{ Storing System Call Numbers }
+
+
+For simpler representation of system calls in the kernel, every syscall has its own unique number. In Fig.~\ref{fig:passthrough:writePassthrough} the first passed argument was introduced as system call number even though a variable \_\_dios::\_VM\_SC\_write occurs in the given example.  
+
+To support system calls in \divine, we need to hold their identifiers in easily accessible way. Due to the fact that every system call has its own wrapper which knows the name of the system call, we only need to map names to the identifiers. This is done by declaring an enum \textit{\_VM\_SC} that fully supplies this functionality. 
+
+To create this enum, we use simple macro together with a declaration, that is a modification of a syscall table~\cite{systable} from Linux. As an enum is a set of named values, we can interpret it as a mapping of syscall names to their identifiers. 
+
+For example, the value of  \_VM\_SC\_write is 1, as the file \textit{systable.def} contains a line SYSCALL(1,write).
+
+\section{ Implementation } \label{sec:passthrough:impl}
+
+For the purposes of integrating \textit{syscall passthrough} into \divine, we created a class \texttt{Passthrough} that is part of new \dios's configuration. The configuration has to differ from the default one, as concurrently supporting the VFS and \textit{syscall passthrough} does not make sense. 
+
+For this reason, we added a new mode: \textit{passthrough mode}. This mode is obtained by replacing \texttt{VFS} for \texttt{Passthrough} in configuration and does not support the \textit{verify} mode of \divine.
+
+ As the number of system calls is large (typically a few hundred), we decided to generate these wrappers using a macro~\ref{sec:passthrough:functions} and C++ templates. 
+ 
+
+\subsection{Automatic Generation of Implementations} \label{sec:passthrough:functions}
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=Macro]
+SYSCALL( write, ssize_t,
+        (int _1, COUNT(const void *) _2, size_t _3 ))
+\end{lstlisting}
+\caption{
+    One line from syscalls declaration.
+}
+\label{fig:passthrough:declaration}
+\end{figure}
+
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=Macro]
+#define SYSCALL( name, schedule, returnType, arguments ) 
+returnType name arguments {
+    returnType returnValue;
+    int outType = _VM_SC_Int32 | _VM_SC_Out;
+    tuple input = {_VM_SC_ ## name, outType, returnValue };
+
+    errno = parse(input, _1, _2, _3, _4, _5, _6, _7);
+    return returnValue;
+}
+#include <sys/syscall.def>
+#undef SYSCALL
+\end{lstlisting}
+\caption{
+    A simplified pseudo code of the macro for generating \textit{syscall passthrough} functions inside \texttt{Passthrough} class.
+}
+\label{fig:passthrough:functions}
+\end{figure}
+
+As already mentioned, the declarations of system calls had slightly changed. The new form is shown in Fig.~\ref{fig:passthrough:declaration}. Some input arguments contain additional metadata, namely \textit{Count, Mem, Out, Struct}, which helps to parse the arguments for the \vmsyscall function.
+
+The Fig.~\ref{fig:passthrough:functions} shows generation of wrapper functions for system calls in \textit{passthrough mode}, which is made automatically. Thanks to the structure of the declarations, functions can be created relatively simply.
+
+The process of this generation is shown in Fig.~\ref{fig:passthrough:functions}.
+
+The generated function creates an input tuple which will be propagated through the whole parsing process and will progressively build a full input tuple for the \vmsyscall. The variable \textit{outType} contains metadata for the return value demanded by the \vmsyscall.
+
+Finally, there is a call of a function \textit{parse}. This call exploits the fact, that input arguments are called \_1, \_2, etc., as shown in Fig~\ref{fig:passthrough:declaration}. Additionally, a class \texttt{Pad} is defined, and seven objects, \_1, \_2,.. \_7 are globally instantiated. This way, the first arguments are taken from the input arguments of the function, and the rest is filled with the instances of Pad.
+
+\subsection{Parsing the Input Arguments} \label{sec:passthrough:parse}
+
+The mission of \textit{parse} function is to process input arguments given to the wrapper of \texttt{Passthrough} into a form suitable for the \vmsyscall, shown in Fig.~\ref{fig:passthrough:writePassthrough}. In other words, the \textit{parse} function builds suitable \textit{input tuple}.
+
+This process consists of two parts: resolving a type of the given argument together with assigning the right flags, which is done by the \textit{process} function and gives us a tuple \textit{addition} which is subsequently inserted into this tuple into the \textit{input tuple}.
+
+This way, the tuple is progressively built as the arguments are processed and the result is always appended to the end of the tuple. At the end, the \textit{input tuple} contains all arguments needed by \vmsyscall. 
+
+As mentioned in Sec.~\ref{sec:passthrough:functions}, the parse function is called with input arguments followed by instances of the class Pad. This design allows us to stop the recursion after receiving an instance of the Pad as it corresponds to the end of inputs arguments belonging to the syscall. This behaviour is achievable thanks to the template specialisation in C++.

@@ -1,0 +1,54 @@
+
+\chapter{Preliminaries} \label{chap:prelim}
+
+The structure of the filesystem used in \divine is inspired by the UNIX filesystem architecture, thereupon I will introduce this type of filesystem more precisely.
+
+\section{File System in UNIX}
+
+A filesystem is an aggregation of data structures and methods over them that an operating system employs to keep track of the state of files on a disk.
+
+Moreover, a filesystem is a hierarchical storage of data defined by the specific operations provided over the data, such as creation, deletion or mounting. Filesystems contain files, directories and associated control information~\cite{LinuxKernelDev}. 
+
+File types specific for the UNIX filesystem are regular files, directories and symbolic links, named pipes, and special files. 
+To obtain properties of any file type, we use the system call \textit{stat()}. 
+\begin{figure}[h!]
+\begin{lstlisting}[style=DOS]
+$ stat file.c 
+  File: 'file.c'
+  Size: 199             Blocks: 8          IO Block: 4096   regular file
+Device: 801h/2049d      Inode: 5116012     Links: 1
+Access: (0664/-rw-rw-r--)  Uid: ( 1000/  kejsty)   Gid: ( 1000/  kejsty)
+Access: 2017-02-03 14:53:41.597784860 +0100
+Modify: 2017-01-26 23:18:55.873924732 +0100
+Change: 2017-01-26 23:18:55.873924732 +0100
+Birth: -
+\end{lstlisting}
+\caption{
+      Regular file properties presented as output of invoking the stat utility on a regular file file.c. This utility internally uses the system call \textit{stat()} and reproduces its output.
+    }
+  \label{fig:regFileProp}
+\end{figure}
+
+
+Every regular file has several properties, as shown in Fig.~\ref{fig:regFileProp}, among other permissions or size of the file. The most important detail seen in this figure is the \textit{Inode}. The inode, often called file metadata, is an object, holding every single information needed by the kernel to operate with the file or directory. This number uniquely identifies each file within a filesystem, as there can be more links to one file in address hierarchy (e.g. hard links).
+
+
+\section{Virtual File System in UNIX}
+
+
+The Virtual File System, sometimes called \textit{Virtual File Switch} or \textit{VFS}, is the subsystem of the Linux kernel that implements the file and file system-related interface provided to user-space programs. It brings the ability for different filesystems to communicate via the standard Unix system calls, regardless of the structure of the filesystem or the underlying physical medium. Among other things, it means that we are able to use these system calls to copy or move data from one file system to another, which was not possible in older operating systems, such as DOS, without adding special tools.
+
+The key idea behind the VFS consists of the introduction of a common file model capable of representing all filesystems. This model strictly mirrors the file model provided by the traditional Unix filesystem~\cite{LinuxKernel}, so each filesystem implementation must provide a set of functions that converts its physical structure into the VFS's common file model in order to respect the model and become interoperable with other filesystems.
+
+\section{Interrupts} \label{sec:interrupts}
+
+As the behaviour of interrupts is similar to the behaviour of system calls, we will mention few characteristics of them and subsequently compare system calls to interrupts in Sec.~\ref{sec:syscalls:syscalls}.
+
+An interrupt is a mechanism of the operating system that provides an opportunity for the hardware to send a request for an attention from the operating system.
+
+Operating systems need to distinguish between interrupts in order to react adequately to them. This is done by associating each interrupt with a unique value, often called the interrupt request line. Some of these are standardised for Linux, for example, value 1 stands for keyboard interrupt~\cite{InsideLinux}, others are dynamically selected.
+
+Knowing which interrupt was raised, allows us to be able to handle it. For this purpose, kernel has a routine called the interrupt handler. In Linux, these handlers are typically C functions.
+
+These functions are always invoked by the kernel as a response to an interrupt, and in order to be quick and uninterrupted, they are executed in special (atomic) context.
+

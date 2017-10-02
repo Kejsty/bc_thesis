@@ -1,0 +1,55 @@
+\appendix
+\chapter{Archive and Manual} \label{chap:archive}
+
+\section{Archive Structure}
+
+The archive submitted with this thesis contains the sources of the thesis itself and a file \textbf{thesis.zip} whose unzipping gives us two directories.
+
+C programs for the \textit{passthrough} mode and the pdf of generated graph from the \textit{replay} mode of \dios can be found in the directory \textbf{examples}. As not all changes mentioned in this thesis were a part of the current version of \divine at the time of the submission of this thesis, the comprising a modified distribution of DIVINE 4 is in directory \textbf{divine4-passthrough}.
+
+The implementation of system calls is included primarily in the \textbf{runtime/dios/filesystem} subdirectory.
+
+\section{ \divine }  \label{sec:archive:divine}
+
+\subsection{Instalation}  \label{sec:archive:install}
+
+In order to compile \divine, it is necessary to have an up-to-date
+Linux distribution with a C++14 capable compiler. The compilation was tested
+with GCC 5.3.0 and Clang 3.7.0, both using libstdc++ 5.3.0 as the C++ standard
+library and CMake~\cite{Still2016thesis}
+
+After unzipping the provided \textbf{thesis.zip}, please follow these instructions:
+
+\begin{lstlisting}[style=DOS]
+cd divine4-passthrough
+make
+make install
+\end{lstlisting}
+
+
+\subsection{Running provided examples}  \label{sec:archive:verify}
+
+A program can be verified by \divine using the \textbf{divine verify} command, by simple typing 
+\begin{lstlisting}[style=DOS]
+divine verify program.c
+\end{lstlisting}
+
+To run the program in the \textit{passthrough} mode, use following command:
+
+\begin{lstlisting}[style=DOS]
+divine run -o configuration:passthrough -o nofail:malloc program.c
+\end{lstlisting}
+
+The program will be executed in \textit{passthrough} under the assumption that malloc does not fail. Additionaly, a syscall trace of the execution will be stored in a file \texttt{passthrough.out}. This output file can be subsequently used to verify the program using \textit{replay} mode by typing:
+
+\begin{lstlisting}[style=DOS]
+divine verify -o configuration:replay -o nofail:malloc program.c
+\end{lstlisting}
+
+To visualise the generated state space of the program in the \textit{replay} mode (illustrating that for a parallel program new interleavings occur), the \texttt{draw} mode of \divine can be used:
+
+\begin{lstlisting}[style=DOS]
+divine draw -o configuration:replay -o nofail:malloc program.c
+\end{lstlisting}
+
+Please refer to \textbf{divine cc --help} for more details, or read the manual~\cite{Divine}.

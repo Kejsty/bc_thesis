@@ -1,0 +1,180 @@
+\chapter{ System Calls in \divine } \label{chap:impl}
+    
+The fact that system calls should be executed in the kernel mode and thus have different permissions together with an assurance that the execution of a system call will not be interleaved with the execution of another thread need to be reflected in our implementation.
+
+To achieve the previously mentioned, the process of handling a syscall consists of two main constituents: the wrapper routines (Sec.~\ref{sec:impl:wrapper}) and the actual implementation of system call (Sec.~\ref{sec:impl:impl}) which runs in \dios kernel. To do this, \dios provides helpers which facilitate entering the kernel mode.
+
+\section{ Wrapper Routines } \label{sec:impl:wrapper}
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=C]
+SYSCALL(write, ssize_t, (int _1, const void * _2, size_t _3 ))
+\end{lstlisting}
+\caption{ One line from file \textit{syscall.def} providing declaration of write syscall for subsequent generation of components needed for the system call  }
+\label{fig:impl:declaration}
+\end{figure}
+
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=Macro]
+#define SYSCALL(name, schedule, returnType, arguments)                             
+returnType name arguments {                                                
+   returnType retval;                                                    
+    __dios_syscall(_DiOS_SC::name, rv, _1, _2, _3, _4, _5, _6);
+    return retval;                                                     
+}
+\end{lstlisting}
+\caption{
+       Simplified macro for generating wrapper routines implementations for declarations from \textit{syscall.def}. Their form is shown in Fig.~\ref{fig:impl:declaration}.
+    }
+  \label{fig:impl:wrapper}
+\end{figure}
+
+
+The wrapper routines in \divine are in fact implementations of functions from headers such as \texttt{unistd.h, fcntl.h, unistd.h}, etc. Their main mission is to alert the operating system (\dios) that a request by a verified program for a system call was raised.
+
+Our approach identifies system calls by numbers. To cause the number to be compatible during the whole process we declared an enum (\textit{\_DiOS\_SC}). This enum provides symbolic value to identify given system call inside \dios according to its name. The compatibility is achieved by both \dios and routines using the same enum.
+
+As shown in Fig.~\ref{fig:impl:wrapper}, the implementation of wrapper routines is generic. Every wrapper routine call invokes the \dios function \diossyscall (Sec.~\ref{sec:diosSyscall}) with particular system call identifier from \textit{\_DiOS\_SC} and forwards input arguments.
+
+This call to \diossyscall exploits the fact that input arguments are called \_1, \_2, etc., as shown in Fig~\ref{fig:impl:declaration}. Additionally, a class \texttt{Pad} is defined and seven objects, \_1, \_2,.. \_7, are globally instantiated. This way, the first arguments are taken from the input arguments of the routine and the rest is filled with the instances of Pad. This solution is possible as the \texttt{Pad} instances are global. 
+
+Let us assume that verified program calls function \textit{write} with some input arguments. The effect will be following:
+
+Firstly, the wrapper routine generated from a prototype (Fig.~\ref{sec:impl:wrapper}) for \textit{write} is executed. This wrapper routine calls \diossyscall function (Fig.~\ref{sec:diosSyscall}) and expects it to call the system call implementation with number defined by enum \textit{\_DiOS\_SC} as write. The input parameters provided to this function together with mentioned enum suffice to identify the syscall inside \dios. 
+
+After performing this function, the value received in the variable \textit{retval} is returned. This way, the routine pushes the responsibility of invoking the system call to the \dios.
+
+\subsection{ Function \texttt{\_\_dios\_syscall}} \label{sec:diosSyscall}
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=C]
+void __dios_syscall( int syscode, void* ret, Args rest ) {
+   uintptr_t flag =  __vm_control( Get, Flags);
+                 
+    __dios_trap( syscode, ret,  rest );
+ 
+    __vm_control( Set, Flags, flag | Interrupted  ); 
+} 
+\end{lstlisting}
+\caption{
+       Simplified implementation of the \diossyscall function, taken from \divine source codes.
+    }
+  \label{fig:diosSyscall}
+\end{figure}
+
+The \diossyscall is a \dios routine of preparation of environment before invoking an interrupt to jump into \dios (by calling the function \textit{trap}).
+
+The Fig.~\ref{fig:diosSyscall} shows simplified implementation of this function. The first two parameters, system call number and return value, were already mentioned. The remaining argument \textit{rest} holds parameters for the system call.
+
+The run of the function is the following: At first, the current flags are stored into variable \textit{flag} to recover them later. 
+Subsequently, the function \textit{trap} is called. This method creates a new system call instance and invokes it, as shown in Sec.~\ref{sec:impl:trap}. In the end, the call of \textit{\_\_vm\_control} on the last line in Fig.~\ref{fig:diosSyscall} restores the \dios with original flags stored in the variable \textit{flag} together with an additional flag for an interrupt.
+
+The \textit{flags} are restored in order to save a program executed under mask (e.g. during executing an atomic section) even after executing a system call. The flag \textit{Interrupted} is added to assure that the program will be interrupted so the scheduler can be called. This approach is necessary since the system call could have globally observable effect and thus thread rescheduling is necessary.
+
+\subsection{Function \texttt{trap}} \label{sec:impl:trap}
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=C]
+ static void trap(int syscode, returnType retval, Args rest) noexcept {
+   _DiOS_Syscall instance;
+    instance._syscode = ( _DiOS_SC ) syscode;
+    instance._ret = retval;
+    instance._args = rest;
+    
+    __vm_control( Set, User1, &instance );
+    __vm_control( Set, Flags, Interrupted );
+    __vm_control( Set, Flags, Mask );
+} 
+\end{lstlisting}
+\caption{
+       Simplified implementation of function \textit{trap}. Taken from \divine source code.
+    }
+  \label{fig:impl:trap}
+\end{figure}
+
+Generally, the \texttt{trap} function creates an instance of system call holding data of syscall demanded by a program and triggers an interrupt. This is done as follows (Fig.~\ref{fig:impl:trap}):
+
+First, an instance internally representing a syscall is created and afterwards filled with the necessary data, namely \textit{syscode}, representing the \dios internal system call number given by the enum  \textit{\_DiOS\_SC}; \textit{ret}, the return value of the syscall; and \textit{args}, input arguments for the given syscall (can be apprehended as a tuple).
+
+Afterwards, the created instance is stored into \textit{User1} register, a \dios internal register, and an interrupt is initiated. The interrupt invocation means that \dios musts run the scheduler. One important part of the reschedule process is entering the kernel mode by setting the flag \textit{KernelMode}, second is recognising the instance of system call in the \textit{User1} register and consequent handling of it.
+
+\section{Implementation of System Calls}  \label{sec:impl:impl}
+
+The procedure of handling a syscall operating over a filesystem consists of calling the implementation using the interface provided by VFS while still entering the kernel mode.
+
+ For \dios to have a simple access to system calls, an additional table of pointers to their implementations is held. In this table, the position of an implementation is determined by the value from the \textit{\_DiOS\_SC} enum.
+
+These implementations are mostly unmodified, i.e. from \divine 3, with small changes such as elimination of interrupts before accessing the filesystem (as this is now handled by \dios), or a propagation of the information about a demand to reschedule in case of blocking system calls.
+
+ Additionally, several functions working directly with the filesystem were not system calls. These functions have been completely rewritten as a combination of existing system calls. 
+
+For example, the function \textit{send} in not a system call directly but can be implemented as a special case of system call \textit{sendto}.
+
+
+
+\section{Further changes to VFS} \label{sec:impl:changes}
+ 
+ After integrating the VFS some additional changes in this implementation has been made. The changes came as an output of an attempt to modularize \dios together with the additional functionality of \dios mentioned in next chapters.
+ 
+ This reimplementation includes some cleaning and changes in the structure of \dios together with the system calls implementation. Withal, it also showed several disadvantages of the old implementation. For example, the table of system calls has been global and thus other parts of \dios could simply access it. The access to the internal information of current \dios's state by executed system calls shows up to be undesirable likewise. The main change is, however, introduction of configurations in \dios (Sec.~\ref{sec:impl:config}).
+ 
+ Furthermore, there were changes in the form of declarations (Fig.~\ref{fig:impl:declaration}) to capture more information about the work with memory by syscalls, as this information becomes important.
+ 
+ Also, a \texttt{Syscall} class was introduced that provides handling of system calls and encapsulates the table of the implementations. Additionally, this class handles arguments unpacking process, needed due to the new form of declarations.
+ 
+ There were more participants working on this reimplementation and modularization. All further chapters build on this new implementation.
+ 
+ \subsection{Configuration} \label{sec:impl:config}
+ 
+ The configuration in \dios is a hierarchic structure of classes providing several functions for the operating system.
+ 
+  They build on the inheritance hierarchy, i.e. if a function not implemented by a subclass is called, the call is propagated to its superclasses. The hierarchy is build as follows: on the bottom is always a \texttt{BaseContext} (see Sec.~\ref{sec:impl:basecontext}). Above this class stands some additional classes. Finally, there is a \texttt{VFS} (see Sec.~\ref{sec:impl:vfs}) implementing many system calls over the \dios's filesystem.
+ 
+This configuration including VFS is the default one. Other configurations will be demonstrated in next chapters.
+
+\subsection{Class \texttt{BaseContext}} \label{sec:impl:basecontext}
+
+To build configuration hierarchy, we need to start from the bottom. Therefore, we created a class \texttt{BaseContext}, that simulates this "bottom". This class implements every system call from the declaration file. However, the design is tricky: every such implementation informs the user that this system call has not been actually implemented and causes a fault in \dios. 
+
+The result of this is that if a subclass (which will apply to every class mentioned in this thesis) implements such a system call, thanks to the inheritance hierarchy, the implementation of the subclass hides the implementation of the \texttt{BaseContext}.
+
+Additionally, the VFS does not have to implement all system calls from declaration file, as some of them are provided by other parts of the configuration. 
+
+\subsection{ Class \texttt{VFS} } \label{sec:impl:vfs}
+
+Since there is intention to support more types of syscall executions (as will be shown in next chapters) we decided to implement them as separate configurations. 
+
+ For this purpose, we implemented a class VFS (standing for Virtual File System), that will fulfil the system calls implementations over \divine's filesystem (Sec,~\ref{sec:impl:vfs}). This way, the implementation of system calls are not functions but methods of the VFS class. 
+ 
+The access to these methods is controlled, as a system call can be executed only by parts possessing the current configuration. Furthermore, the VFS fully represents the interface of the \divine's filesystem.
+
+
+\section{Example} \label{sec:impl:example}
+
+In this section, an example of a program using system call will be shown.
+
+ We are able to verify this program after the integration of VFS into \divine. To reproduce it, please follow the instructions for installation and usage of \divine provided in Sec.~\ref{sec:archive:verify}.
+
+Let us consider the simple program shown below. This program creates a file (line 5),  writes into it (line 7) and then closes it (line 8). Subsequently, this file is opened again (line 10), a read from it is invoked (line 12), the loaded string is compared with the inserted (line 13) and the file is closed again (line 14).
+
+\begin{lstlisting}[style=Cpp]
+int main() {
+    char buf[8] = {};
+    int fd = open( "test", O_WRONLY | O_CREAT, 0644 );
+    assert( fd >= 0 );
+    assert( write( fd, "tralala", 7 ) == 7 );
+    assert( close( fd ) == 0 );
+    
+    fd = open( "test", O_RDONLY );
+    assert( fd >= 0 );
+    assert( read( fd, buf, 7 ) == 7 );
+    assert( strcmp( "tralala", buf ) == 0 );
+    assert( close( fd ) == 0 );
+    return 0;
+}
+\end{lstlisting}
+
+As the VFS is empty at the beginning (thus there will be no problem with creating the file on line 5), the program is valid. The result of \divine's verify is: \textbf{error found: no}.
+
+More examples are available in the archive of this thesis. 

@@ -1,0 +1,74 @@
+\chapter{ System Calls in Linux } \label{chap:syscalls}
+
+In this chapter, we will explore how traditional operating system from the POSIX family implements system calls and explain some parts important for syscalls, such as kernel mode, user space libraries or errno.
+
+\section{ Syscalls } \label{sec:syscalls:syscalls}
+
+A syscall stands for a system call. The system call is the fundamental interface between an application and the Linux kernel~\cite{Man_syscall}. This interface provides access to the hardware, that is fully controlled and also handles messages between the application and the kernel. 
+
+System calls can be apprehended as the layer between the hardware and user-space processes. Placing an additional layer between user-space, that is the application, and the hardware has several benefits. This way applications do not have to be concerned with the hardware specifications such as the type of disk or the filesystem. This layer also watches our permissions to requested actions, so an application is not permitted to directly perform any instruction it wants without permissions, which preserves stability and secure access to system resources. Last but not least, this approach makes programs more portable.
+
+The concept of system calls in Linux has a lot in common to that of the interrupts as a syscall also represents an (user-space) request of a kernel service. 
+
+\section{ Wrapper Routines }
+
+As system call is an interface directly communicating with the kernel, it shall not be called directly from an application. Instead, it is used through a wrapper function (or wrapper routine), whose only purpose is to issue a system call.
+
+These wrapper routines can be found on typical Unix system in \texttt{libc} \- standard C library. In Linux, this library is provided by the \texttt{glibc} \- the GNU C Library~\cite{glibc}. Usually, each system call has its own corresponding wrapper routine~\cite{LinuxKernel}. Hence, these routines can be seen as the interface of an operating system.
+
+Moreover, each system call on POSIX-like systems has internally assigned a specific number, the system call number. The number together with \texttt{libc} generic function \texttt{syscall} allows us to invoke the system call directly, without possessing the knowledge of the exact syscall function name.
+
+Let us inspect the behaviour of the wrapper routines and system calls in a simple example.
+
+Having a simple C program using the \texttt{libc} function \textit{write} (see Fig.~\ref{example:HelloWorld}), we will use \textit{ltrace} tool to examine the internal interpretation of it. The \textit{ltrace} utility displays a set of user-space calls of a program~\cite{ltrace}.
+
+
+\begin{figure}[!ht]
+\begin{lstlisting}[style=C]
+#include <unistd.h>
+
+int main() {
+    write(1, "Hello World", 11);
+    return 0;
+}
+\end{lstlisting}
+\caption{
+        A simple program in C programming language that writes "Hello World" on the standard output (the standard output has the file descriptor 1).
+    }
+  \label{example:HelloWorld}
+\end{figure}
+
+
+\begin{figure}[h!]
+\begin{lstlisting}[style=DOS]
+ltrace -S ./example
+...initialization
+__libc_start_main(0x400526, 1, 0x7ffd80c3d778, 0x400550 <unfinished ...>
+write(1, "Hello World", 11 <unfinished ...>
+SYS_write(1, "Hello World", 11Hello World) 
+<... write resumed> )                        
+SYS_exit_group(0 <no return ...>
+
+\end{lstlisting}
+\caption{
+       The output of the ltrace utility investigating the program from Fig.~\ref{example:HelloWorld}.
+}
+  \label{example:ltrace}
+\end{figure}
+
+The output of the trace utility (from Fig.~\ref{example:ltrace}) demonstrate that the wrapper routine for \textit{write} (form the \texttt{libc} library) calls the syscall implementation \textit{SYS\_write}. The implementation is provided by the operating system and thus is executed in the kernel mode.
+
+\section{ Kernel Mode }
+
+ In the majority of operating systems, the CPU spends its time in two different modes, kernel mode and user mode. In the user mode, the executed program has no ability to directly access the hardware or reference memory not owned by the program without asking for the permission from the operating system first. This mode is present during basic interaction with the system or during the run of an application.
+ 
+ On the other hand, in kernel mode, the code has complete and unrestricted access to the hardware, so every CPU instruction can be executed and any memory address referenced in this mode. The kernel mode is generally reserved for the lowest-level and trusted functions of the operating system. System calls are executed in the kernel mode. They are expected to be quick.
+ 
+  In these wrapper functions, everything is set up, registers are assigned the right values and only then the syscall is invoked in order to be fast and effective.
+ Crashes in the kernel mode are mostly catastrophic, hence the permissions checking in the kernel is not being omitted.
+
+\section{ Errno }
+
+The return value of a system call symbolises the result of the executed call. Although the meaning of this value depends mostly on the called system call, the return value -1 usually indicates that kernel was unsuccessful in accomplishing the given request. In this case, not only -1 is returned but also the \textit{errno} variable is set to a specific \textit{error code}.
+
+The meaning of the error code corresponds to a symbolic error name. The list of them is specified by POSIX.1-2001 and C99 standard~\cite{Man_errno}. On that account, the errno provides a valuable feedback to the user program about the origin of the problem, such as file not found or insufficient permissions.

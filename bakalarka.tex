@@ -1,0 +1,229 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% I, the copyright holder of this work, release this work into the
+%% public domain. This applies worldwide. In some countries this may
+%% not be legally possible; if so: I grant anyone the right to use
+%% this work for any purpose, without any conditions, unless such
+%% conditions are required by law.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[
+  digital, %% This option enables the default options for the
+           %% digital version of a document. Replace with `printed`
+           %% to enable the default options for the printed version
+           %% of a document.
+  table,   %% Causes the coloring of tables. Replace with `notable`
+           %% to restore plain tables.
+  nolof,     %% Prints the List of Figures. Replace with `nolof` to
+           %% hide the List of Figures.
+  nolot,     %% Prints the List of Tables. Replace with `nolot` to
+           %% hide the List of Tables.
+  nocover,
+  final
+  %% More options are listed in the user guide at
+  %% <http://mirrors.ctan.org/macros/latex/contrib/fithesis/guide/mu/fi.pdf>.
+  11pt
+]{fithesis3}
+%% The following section sets up the locales used in the thesis.
+\usepackage[resetfonts]{cmap} %% We need to load the T2A font encoding
+\usepackage[T1,T2A]{fontenc}  %% to use the Cyrillic fonts with Russian texts.
+\usepackage[
+  main=english, %% By using `czech` or `slovak` as the main locale
+                %% instead of `english`, you can typeset the thesis%
+                %% in either Czech or Slovak, respectively.
+  english,german, russian, czech,  %% The additional keys allow
+]{babel}        %% foreign texts to be typeset as follows:
+%%
+%%   \begin{otherlanguage}{german}  ... \end{otherlanguage}
+%%   \begin{otherlanguage}{russian} ... \end{otherlanguage}
+%%   \begin{otherlanguage}{czech}   ... \end{otherlanguage}
+%%   \begin{otherlanguage}{slovak}  ... \end{otherlanguage}
+%%
+%% For non-Latin scripts, it may be necessary to load additional
+%% fonts:
+\usepackage{paratype}
+\def\textrussian#1{{\usefont{T2A}{PTSerif-TLF}{m}{rm}#1}}
+\usepackage{makeidx}      %% The `makeidx` package contains
+\makeindex                %% helper commands for index typesetting.
+%% These additional packages are used within the document:
+\usepackage{paralist}
+\usepackage{amsmath}	
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{url}
+\usepackage{menukeys}
+\usepackage{amssymb}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+%\usepackage{babelbib}
+%\usepackage{cite}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{xspace}
+\usepackage{tikz}
+\usetikzlibrary{fit,backgrounds,calc,arrows,automata,positioning,shapes,decorations.pathreplacing}
+\tikzset{
+    *|/.style={
+        to path={
+            (perpendicular cs: horizontal line through={(\tikztostart)},
+                                 vertical line through={(\tikztotarget)})
+            % is the same as (\tikztostart -| \tikztotarget)
+            % but just to be safe: http://tex.stackexchange.com/a/29781/16595
+            -- (\tikztotarget) \tikztonodes
+        }
+    },
+    |*/.style={to path={
+        (\tikztostart) -- (perpendicular cs: vertical line through={(\tikztostart)},
+                                             horizontal line through={(\tikztotarget)})
+    }}
+}
+
+
+\newcommand{\divine}{\textsf{DIVINE}\xspace}
+\newcommand{\diossyscall}{\textit{\_\_dios\_syscall}\xspace}
+%%
+%% The following section sets up the metadata of the thesis.
+\thesissetup{
+    date          = \the\year/\the\month/\the\day,
+    university    = mu,
+    faculty       = fi,
+    type          = bc,
+    author        = Katarína Kejstová,
+    gender        = w,
+    advisor       = Mgr. Vladimír Štill,
+    title         = {Virtual File System in \divine~4},
+    TeXtitle      = {Virtual File System in \divine~4},
+    keywords      = {DIVINE, operating system, file system, system calls, POSIX, C, C++, implementation, verification},
+    TeXkeywords   = {\divine, operating system, file system, system calls, POSIX, C, C++,  implementation, verification},
+}
+\thesislong{abstract}{
+This work focuses on the integration of Virtual Filesystem (VFS) into \divine~4 by exploiting the concept of system calls. The VFS, which was present in \divine~3 as a set of functions, is now available to programs running in \divine~4 through system calls and library wrappers.
+
+VFS is now part of \divine's operating system (\dios), which additionally maintains functionality that system calls expect from the operating system: scheduling, interrupts and switches between kernel and user mode. 
+
+Subsequently, we use the fact that \dios provides a syscall interface and introduce two additional modes, which differ in the way of handling system calls. In the first, system calls are propagated to the host operating system. This mode is called the \textit{passthrough} mode of \dios. This mode additionally captures information about the system call into an output file, which can be later used as an additional input for the second mode. The second mode simulates system calls using the captured data. We call this mode the \textit{replay} mode.
+    
+The implementation of these modes together with the integration of VFS enables \divine to process additional programs. In particular, programs that use C functions operating over POSIX library or functions from POSIX library directly, programs that rely on the POSIX-compatible filesystem, or programs that require input-output functionality.
+}
+
+
+\thesislong{thanks}{
+
+I would like to thank all the people in the ParaDiSe laboratory for the support
+and for the pleasant work environment. Especially, I would like to thank Vladimír Štill
+for advising this thesis and his willingness to correct all my misunderstandings.
+Additionally, I would like to express my gratitude to Petr Ročkai for helpful
+consultations and sketches he draws when I seem to be confused.
+
+Finally, I would like to thank my family for surviving all the 50 selfies
+I have taken and sent them while writing this thesis.
+}
+   
+\newcommand\todo[1]{\noindent\textcolor{red}{#1}}
+\newcommand\add[1]{\noindent\textcolor{green}{#1}}   
+\newcommand{\dios}{DiOS\xspace}
+\newcommand{\divm}{DiVM\xspace}
+ 
+
+
+% The following section sets up the bibliography.
+%\usepackage{csquotes}
+%\usepackage[              %% When typesetting the bibliography, the
+%  backend=biber,          %% `numeric` style will be used for the
+%  style=numeric,          %% entries and the `numeric-comp` style
+%  citestyle=numeric-comp, %% for the references to the entries. The
+%  sorting=none,           %% entries will be sorted in cite order.
+%  sortlocale=auto         %% For more unformation about the available
+%]{biblatex}               %% `style`s and `citestyles`, see:
+%% <http://mirrors.ctan.org/macros/latex/contrib/biblatex/doc/biblatex.pdf>.
+%\addbibresource{example.bib} %% The bibliograpic database within
+                          %% the file `example.bib` will be used.
+
+
+
+\lstset { %
+    language=C++,
+    backgroundcolor=\color{black!5}, % set backgroundcolor
+    basicstyle=\footnotesize,% basic font setting
+}
+
+\lstdefinestyle{DOS}
+{
+    backgroundcolor=\color{black},
+    basicstyle=\scriptsize\color{white}\ttfamily
+}
+
+\lstdefinestyle{C}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{green!40!black},
+  morekeywords={size_t, ssize_t, uintptr_t },
+  commentstyle=\itshape\color{purple!40!black},
+  identifierstyle=\color{black},
+  stringstyle=\color{orange},
+}
+
+\lstdefinestyle{Cpp}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  basicstyle=\footnotesize,
+  numbers=left,
+  stepnumber=1,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{green!40!black},
+  morekeywords={size_t, ssize_t, uintptr_t },
+  commentstyle=\itshape\color{purple!40!black},
+  identifierstyle=\color{black},
+  stringstyle=\color{orange},
+}
+
+\lstdefinestyle{Macro}{
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  frame=L,
+  xleftmargin=\parindent,
+  language=C,
+  showstringspaces=false,
+  basicstyle=\footnotesize\ttfamily,
+  keywordstyle=\bfseries\color{green!50!black},
+  morekeywords={\_\_dios\_syscall},
+  identifierstyle=\color{black},
+}
+
+%\lstset{language=C,caption={Descriptive Caption Text},label=DescriptiveLabel}
+
+\begin{document}
+
+\include{intro}
+
+\include{preliminaries}
+
+\include{divine}
+
+\include{syscalls}
+
+\include{impl}
+
+
+\include{passthrough}
+
+\include{replay}
+
+\include{conclusion}
+
+\include{archive}
+
+\bibliography{bibliography}{}
+\bibliographystyle{plain}
+
+\end{document}

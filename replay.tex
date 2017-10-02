@@ -1,0 +1,64 @@
+\chapter{Syscall Replay } \label{chap:replay}
+
+The implementation of \textit{syscall passthrough} in Chap.~\ref{chap:passthrough} brings another ability. It creates the possibility to capture values of arguments, together with results of every invoked system call, while passing the system call to the host operating system. This is achievable as our implementation knows input argument types including their size (including buffers) and also the type of the output argument. 
+
+We take advantage of this by storing all this data into an output file and subsequently allowing to load this file back into \divine and use it for a new \textit{replay mode} of \dios. This mode allow us to use knowledge captured in \textit{passthrough mode} (which supports only \textit{run mode}) of \divine, in an new \textit{replay mode} of \dios supporting also the \textit{verify} mode of \divine. 
+
+This mode brings two main advantages. First, it allows us to ``step backward in time'', i.e. derive a reversible debugger from \divine by recording a run of a program in \textit{passthrough} mode and subsequently using the output for a \textit{simulation} run in \textit{replay} mode. 
+
+Second, as already mentioned, it allows us to (partially) verify programs that primarily depend on actions different than system calls, as their behaviour often leads to invoking the same syscall sequence. \divine is thus free to explore all interleavings of such a programs, which was not possible in the \textit{passthrough} mode.
+
+\section{Implementation}
+
+We created a \texttt{Replay} class and by that introduced another configuration mode of \dios: \textit{replay mode}. Before the start of verification process, the input file (currently expected to be \texttt{passthrough.out}) is read and parsed (Sec.~\ref{sec:replay:parsing}). This way, there is no communication with the outside world during verification, all actions are just simulated in accordance with the captured data. After the parse, system calls are stored as a set of \texttt{currently available} syscalls (Sec.~\ref{sec:replay:storing}).
+
+Therefore, when a system call is invoked by a program, the Replay class looks at the currently available system calls. If there is a match (Sec.~\ref{sec:replay:matching}), the system call takes place. From to point of view of a program, the behaviour is indistinguishable from \textit{syscall passthrough}.  Otherwise, the branch of execution is cancelled by setting the \textit{Cancel} flag via the hypercall \textit{control}. This causes the edge leading to the current state to be abandoned and thus it will not become a part of the state space.
+
+\subsection{Parsing}  \label{sec:replay:parsing}
+
+As \dios knows during an execution of a syscall in the \textit{passthrough mode}  the metadata need by \vmsyscall, we simply use this knowledge to store these data using a backwards compatible design. We decided to store the output file in a binary form which brings discomfort in case of reading by a human but is comfortable for parsing.
+
+The first notable detail is that the storing must occur \textit{after} the system call execution, as the value of some arguments of output type (having flag \textit{\_VM\_SC\_Out}) are filled by the system call itself. This is no problem, as the parse method of the class \texttt{Passthrough} works recursively so we collect the data during backtracking from the recursion.
+
+For primitive types we store only the value, for a structure or a buffer, we save the size followed by the content. The structure of the output for a system call is:
+
+\begin{center}
+SYSCALL:\{system call number\}\{the length of the input arguments\\ plus the output\}\{the content\}\{the value of errno\}
+\end{center}
+
+This way, the process of the parsing is straightforward. After reading the leading "SYSCALL" and the system call number, the length of content is read and thus we know the size of a segment of characters representing the input arguments. At the end, the errno is read. Recall, that as the size of system call number as well as the size of errno is known considering they are scalars.
+
+If any error occurs during the parsing, the process is interrupted and an error is raised with a suitable message.
+
+The second notable detail is that the write into the file cannot be done with the \textit{write} syscall as this would cause an infinite recursion (this write would need to write metadata about itself, etc.). This is solved by calling the \vmsyscall directly.
+
+\subsection{Storing Recorded Sysycalls} \label{sec:replay:storing}
+
+As already mentioned, after parsing the input, system calls are stored as a set of \textit{currently available} syscalls for the given state. The system call itself is held as a class encapsulating a number (the system call number), a content (the input data for a system call) and the errno. Additionally, this class holds a set of its successors. The successor of a system call is a syscall, which cannot be executed before executing its predecessor. 
+
+Therefore, after the simulation of a system call is finished, all its successors are added into the set of \textit{currently available}.
+
+Currently, every system call has only one successor which is the subsequently parsed system call. The form of implementation allows us to add heuristics for selection of successors in the future.
+
+\subsection{Matching} \label{sec:replay:matching}
+
+An invocation of a system call by a program verified or run in the \textit{replay mode} is allowed only if it occurs in the \textit{currently available} set. For this reason, we develop a matching algorithm that compares the system call to those currently available.
+
+First, we consider only the system call number, as the process of deeper check is more complicated. If there is no match in these numbers, we refuse to continue which causes cancellation of the executed branch.
+
+Afterwards, we perform a deeper check. The system call is suitable to some from the \textit{currently available} set if it satisfies the following conditions: the system call number matches and for every argument it is true that if the argument is of input type (recall the flag \textit{\_VM\_SC\_In}), its value matches the captured.
+If the argument is of output type (i.e. flag \textit{\_VM\_SC\_Out}), it is filled with captured data.
+
+If any of input types of arguments do not match, the system call is marked as not a match. If there is no deeper match found we refuse to continue and cancel the branch.
+
+
+\section{Example}
+
+We wrote small programs designed mainly to test the \textit{passthrough} and the \textit{replay} mode:
+ \begin{itemize}
+\item \textbf{rw} which creates, writes to and reads from a file 
+\item \textbf{rw-parallel} in which one thread reads from and second writes to a file
+\item \textbf{network} with simple HTTP client that opens a TCP\\IP connection to a fixed IP address, executes a request and writes out the result.
+\end{itemize} 
+
+We tested these programs in both modes. They demonstrate our approach works. These mentioned programs can be found in the archive. To show the thread interleaving in the \textit{replay} mode, we generated a graph (this is already built-in feature in \divine) that shows the state space of the program \textbf{network}. This graph can be found also in the archive of this thesis in \textit{parallel.pdf}.

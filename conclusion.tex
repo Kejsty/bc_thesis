@@ -1,0 +1,31 @@
+\chapter{Conclusion} \label{chap:conclusion}
+
+We integrated the Virtual File System (VFS)  from \divine~3 into \divine~4.  The access of VFS in \divine~3 was uncontrolled, as a verified program called the implementations of system calls directly.
+
+ One part of the integration was to change this approach. This was successfully done by inserting \dios  in-between the program and the implementation. This way, the program's access to the filesystem is fully controlled by \dios. Additionally, the implementation of functions called directly by the program simulates the functionality of system call wrappers that commonly occur in UNIX-based operating systems.
+ 
+The success of this integration is shown in the example provided in Sec.~\ref{sec:impl:example} together with several tests produced for purposes of testing this integration. 
+
+Furthermore, we implemented two new modes of \dios configuration: the \textit{passthrough} mode and the \textit{replay} mode. The current modes of \dios are the following:
+
+\begin{itemize}
+\item \textit{virtual}, or the default mode, in which every interaction with the outside world is simulated. The filesystem is part of the state of the verified program. This mode may be used in all modes of \divine.
+
+\item \textit{passthrough} mode that, with the help of the \vmsyscall function, executes system calls in the host operating system. This way, \divine interacts with the environment, thus this mode is usable only for the \textit{run} mode.
+
+\item \textit{replay} mode, which reproduces (simulates) syscalls using the trace recorded in the \textit{passthrough} mode, but does not interact with the host OS. Thereupon, this mode can be again used in all modes of \divine.
+\end{itemize}
+
+The proposed integration of VFS is already included in the current version of \divine. The integration of new modes of \dios are planned in the future, however, a modified distribution od \divine that contains all the changes described in this thesis is provided in the appendix.
+
+The work described in this thesis is additionally described in the article \textit{From Model Checking to Runtime Verification and Back} \cite{Divine6} which was sent to the \textit{The 17th International Conference on Runtime Verification}. \newpage
+
+\section{Future work} \label{sec:conclusion:future}
+
+The \textit{replay} mode has several limitations in our current implementation.
+
+As some syscalls are blocking (their execution blocks thread until they finish), the run of a program in \textit{passthrough} mode may cause a deadlock of the model checker if the executed syscall blocks and waits for another thread (since there is only one thread executing everything in \divine).
+
+The possible solution would be to convert system calls to non-blocking (e.g. add the O\_NONBLOCK flag) or to create a separate thread for every system call propagated to the host operating system.
+
+An additional limitation is that our current implementation covers only a subset of POSIX. For example, the \texttt{libc} function \texttt{gethostbyname} is not implemented, which means that many interesting programs could not be run or verified.

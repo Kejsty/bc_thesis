@@ -1,0 +1,120 @@
+\chapter{ \divine and its File System} \label{chap:divine}
+
+\section{\divine}
+
+" \divine is a modern, explicit-state, LLVM-based LTL model checker that follows the standard automata-based approach to explicit-state model checking"~\cite{Divine2}. Based on the LLVM toolchain, it can verify programs written in multiple real-world programming languages, including C and C++~\cite{Divine}. The current version is  \divine 4, released in January 2017.
+
+\begin{figure}[h!]
+\begin{tikzpicture}[ ->, >=stealth', shorten >=1pt, auto, node distance=3cm
+                   , semithick
+                   , style={ node distance = 2em }
+                   , state/.style={ rectangle, draw=black, very thick,
+                     minimum height=1.7em, minimum width = 4.4em, inner
+                     sep=2pt, text centered, node distance = 2em }
+                   ]
+  \node[state, minimum width = 6em] (code) {C++ code};
+  \node[state, minimum width = 10.4em, right = 13.6em of code] (prop) {property and options};
+
+  \node[state, below = 2.8em of code, rounded corners] (clang) {compiler};
+  \node[state, below = 1.5em of clang.south west, anchor = north west] (runtime) {runtime};
+  \node[state, right = of clang] (llvm) {LLVM IR};
+  \node[state, right = of llvm, rounded corners, minimum width = 8em] (lart) {instrumentation};
+  \node[state, right = of lart] (illvm) {\divm IR};
+  \node[state, below = 1.5em of illvm.south west, anchor = north west, rounded corners, minimum width = 8em] (verifier) {verification core};
+  \node[above = 0.5em of lart] (pverify) {};
+
+  \node[state, below = 1.7em of verifier.south east] (valid) {\color{green!40!black}Valid};
+  \node[state, below = 1.7em of verifier.south west, minimum width = 8em] (ce) {\color{red}Counterexample};
+
+  \begin{pgfonlayer}{background}
+      \node[state, fit = (pverify) (clang) (runtime) (llvm) (lart) (illvm) (verifier),
+            inner sep = 0.8em, thick, rounded corners, dashed] (verify) {};
+  \end{pgfonlayer}
+
+  \node[below = 0.2em] at (verify.north) {\texttt{divine verify}};
+
+  \path (prop.348) edge[|*] (verifier.north)
+        (prop.192) edge[|*] (lart.north)
+        (code) edge (clang)
+        (runtime) edge (clang)
+        (clang) edge (llvm)
+        (llvm) edge (lart)
+        (lart) edge (illvm)
+        (illvm) edge[|*] (verifier.north)
+        (verifier) edge (valid) edge (ce)
+        ;
+\end{tikzpicture}
+\caption{
+        The workflow of \divine's verification of a given C++ program.~\cite{Workflow}
+    }
+  \label{fig:divine:translation}
+\end{figure}
+
+As shown in Fig.~\ref{fig:divine:translation}, \divine takes a C or C++ program and translates it with Clang compiler, a C language family frontend for LLVM~\cite{Clang}, into LLVM bitcode. This bitcode is consequently instrumented. This generated LLVM bitcode is then linked with the \divine-provided runtime libraries and verified against a given property.
+
+When an error is discovered, \divine produces a readable counter-example, providing information about the erroneous run and a backtrace of the program from the state the error occurred in.
+
+\divine can operate in two main modes: \textit{run} and \textit{verify}. The \textit{run} mode investigate only single execution of a given program in some (random) execution order, i.e. random interleaving of threads together with the random selection of nondeterministic choices (such as the success of a memory allocation). Nevertheless, all behaviours such as memory safety or assertions are still checked. The \textit{verify} mode, on the other hand, considers additionally all thread interleavings and all nondeterministic choices which are essential in case of parallel programs.
+
+Additionally, \divine possesses another mode of operation: \textit{sim}. This mode behaves similarly to a debugger, however, in addition to common debuggers, it allows the user to go back in the execution.
+
+\divine operates over a state space of a program - an oriented graph where vertices represent states of the program (e.g. values in memory locations and registers). To visualise the state space, we can use the \texttt{divine draw} command. The output of such a command can be seen in the attached archive (\texttt{parallel.pdf}).
+
+With the release of \divine 4, this model checker contains its own operating system \dios, running in a \divine's virtual machine.
+
+
+\subsection{Virtual Machine} \label{sec:divine:vm}
+
+Programs in \divine are executed by a virtual machine (\divine VM or \divm for short).  \divm provides the functionality needed to execute an entire operating system, \dios.
+
+The state of \divm consists of two parts, a set of control registers and memory held in the heap. 
+
+Control registers, holding pointers or integers, are described by enum \textit{ControlRegister}, and can be manipulated via the hypercall \textit{control}, providing functionality such as setting or getting a value from a register. Each register has its own purpose.     
+
+Register \textit{Flags}, used as a bitfield, represents a register holding several flags. As VM has many types of flags providing various functionalities and not all of them are important for the purpose of this thesis, I will only introduce some of them.
+
+
+ For example, setting flags \textit{Accepting}, \textit{Error} and \textit{Cancel} indicates whether an edge in a state space should be considered as accepting, erroneous or should be abandoned, and thus not became part of the state space.
+
+
+Setting the \textit{Mask} flag will result in disallowing interrupts, hence the program will execute atomically until resetting the register back to 0. Flag \textit{Interrupt}, on the other hand, gives rise to an instantaneous interrupt, in case the flag for masking is not set. Flag \textit{KernelMode} indicates whether \divm is running in kernel or user mode.
+
+
+Moreover, there are two user registers, \textit{User1} and \textit{User2}. The first of them, i.e. \textit{User1} is notable mainly because the instance of a system call is stored here before an interrupt is invoked, as will be shown in Chap.~\ref{chap:impl}.
+
+The memory in \divm is represented as a directed graph, where nodes stand for objects, and edges represent pointers in these objects. \divm holds for every object not only its data but also a shadow in the form of an image of the entire address space, e.g. additional memory associated with this object. This way the VM has complete knowledge about an object in the program, including information about uninitialised bytes. This feature is important in the implementation of syscall passthrough as will be shown in Chap.~\ref{chap:passthrough}.
+
+As \divine cannot make use of a real operating system, an own POSIX-like operating system was implemented \- \divine’s operating system, \dios in short. This way, the responsibility of scheduling threads is moved from the VM into the OS layer of \dios, which simplifies the VM.
+
+\subsection{Operating System}
+
+\dios provides to the verified program a subset of POSIX interfaces that should cover the requirements of a typical user-level program~\cite{Divine}, as programs usually require a presence of services such as memory management or thread handling in the environment they run on.
+
+Mainly, \dios serves to cover requirements of a typical program, and to provide scheduler routine, determining the order of threads execution, i.e. deciding which of its states will be executed.
+
+\dios further supports fault handling and error tracing. For the purposes of this thesis, the most important component of \dios is its own file system that supplies tools for loading a snapshot of another filesystem, and subsequently, uses it for simulation of operations over it.
+
+\dios runs in a \textit{virtual} mode in the meaning that all interactions with the outside world are simulated. In the other words, no real I/O operation is allowed, due to the fact that verification of parallel applications in DIVINE consists of investigating all possible thread interleavings.
+
+The root cause for this requirement is that these  I/O actions have consequences in the outside world that cannot be replayed or undone. 
+This restriction applies also to the host's file system. \dios can not operate over the host's file system, as one interleaving could affect the result of another.
+ 
+\section{File System} \label{sec:divine:filesystem}
+
+\divine's Virtual file system is a POSIX-compatible filesystem implementation provided by \dios. The effect of any operations performed by the VFS is not propagated to the host~\cite{Divine}. 
+
+The file system in \divine is to a high degree inspired by UNIX filesystem idea. The main concept is that, on the abstract level, everything is a file. 
+
+The concrete objects representing file types are a regular file, write-only file, standard input, pipe, stream and datagram socket, and directory. These objects are held by an inode object, so every file type object is always strictly determined by its inode. By contrast, two different paths can be bound to the same inode object. This approach very closely corresponds to that used in UNIX. 
+
+After opening a regular file or pipe, the filesystem creates a descriptor for the file or pipe, i.e. over its inode. \divine implements special descriptors for a regular file, pipe, socket and directory, as descriptors provide operations such as read, write, close or offset, which behave differently for various descriptors.
+
+Above this filesystem implementation stands a virtual filesystem (VFS), taking a responsibility for the filesystem and providing basic operations over the parts of the filesystem (i.e. files or sockets) needed by system calls.
+
+Supported are not only basic functions like \textit{open, read, write, close}, which are needed for the most basic communication and for basic C printing functions such as \textit{printf}, and C++ operators on streams, but also more complex functions as \textit{stat, fstat} or  \textit{lseek} and functions for sockets such as \textit{socketpair, getsockname, bind or connect}.
+
+\divine's VFS currently supports a significant part of functions defined in header files \textit{unistd.h, sys/socket.h} and \textit{sys/stat.h}.
+
+The initial state of the filesystem is empty directory root, e.g. with path~\textit{/}, holding only~\textit{.} and \textit{..}~directories. Every file that the program operates with must be created during the program execution. Herewith, \divine can only verify programs operating with files created during the execution of the program. 
+
+We dealt with this inconvenience by bringing the ability to create a snapshot of a directory selected by the user, and therefore use already constructed files instead of the necessity to create them first. \divine currently supports capturing regular files, directories and symlinks. The process of detecting hard links is done by inspecting the inode number of files.

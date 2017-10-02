@@ -1,0 +1,21 @@
+\chapter{Introduction} \label{chap:intro}
+
+With the constant addition of requirements, together with the demand on the growth of performance of modern applications, there is a pressure on both software and hardware to increase their speed.
+
+ Seeing that the current clock speed of transistors cannot be increased without overheating, manufacturers produce architectures with multiple processors communicating directly through shared memory and hardware caches. In order to benefit from multiprocessors and speed up the computing we often need to include parallelism in our application, i.e. build application comprising of multiple threads that can be executed on multiple processing units.
+
+In such shared memory applications, we must ensure that shared resources are protected from concurrent access. By shared resources, we mean not only memory allocated on the heap and global variables, but also opened files, pipes, and sockets. If multiple threads manipulate the same data at the same time in a non-atomic style, these threads can overwrite each other's changes which can lead to an inconsistent state.
+
+As multi-core CPUs are prevalent today, multithreaded applications are relatively wide-spread and widely used. These applications are quite hard to test for absence of not only common errors but also concurrency problems, such as race conditions or deadlocks. 
+
+Testing, used commonly nowadays, seems not to be satisfying enough, as a run of a test is affected by the scheduling of threads. That mostly means that the issue may not be found by simply running tests, even if the error is present. The issue often appears in the case of errors occurring only in very specific situations, e.g. exact threads interleaving.
+
+The use of formal methods brings a possibility to not only avoid problems in testing parallel applications but also to prove the correctness of a program. One of the methods of formal verification is model checking. DIVINE is a modern model checker able to verify multithreaded applications written in real-world programming languages such as C and C++. 
+
+It is common that these applications communicate with the user or surrounding environment during their execution, for example by opening a file, or by writing to the standard output. As DIVINE verifies real-world applications, it is essential to support, among others, verification of operations over the filesystem, as these operations are the main part of the communication between a user and a system, and therefore often the key part of a program.
+
+In DIVINE 3, the operations over filesystem were supported, however, the access to the filesystem was uncontrolled, as the program called operations over the filesystem directly. 
+The introduction of integrated operating system DiOS in DIVINE 4 brings the possibility to control access to the filesystem in a way similar to the traditional UNIX-like operating system, e.g. through system calls. The goal of this thesis is to examine this possibility and produce a mechanism to work with the filesystem safely with the use of DiOS.
+
+The structure of this thesis is the following: Chapter \ref{chap:prelim} provides necessary fundamentals of crucial parts of UNIX-like operating systems. Subsequently, Chapter \ref{chap:divine} provides a detailed description of \divine's components essential for our implementation. Chapter \ref{chap:syscalls} gives detailed overview of the implementation of system calls in UNIX-like system and is followed with the implementation of syscalls in \divine in Chapter \ref{chap:impl}. Chapters \ref{chap:passthrough} and \ref{chap:replay} introduce new modes of \dios (namely \textit{passthrough} and \textit{replay}) by applying different approach to system calls handling. Finally, Chapter \ref{chap:conclusion} summarizes our contribution and discusses possible future work.
+
